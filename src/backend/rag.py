@@ -177,7 +177,7 @@ class RAGModel:
         else:
             print("DB already created")
 
-        print(f"creating completion model using provider '{config["completion_provider"]}'")
+        print(f'creating completion model using provider {config["completion_provider"]}')
 
         # Completion model, answer request based on supporting content
         self.completion_model = CompletionModel(

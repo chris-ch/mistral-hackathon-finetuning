@@ -18,7 +18,7 @@ Introducing Alplex, an AI-powered virtual law office designed to assist you with
 
 ### Application Interface
 
-![Application Interface](https://github.com/unit8co/mistral-hackathon-finetuning/assets/1738060/6817ec8a-19bf-4cfb-9484-f42ae4ffd175)
+![Application Interface](https://github.com/chris-ch/mistral-hackathon-finetuning/assets/1738060/6817ec8a-19bf-4cfb-9484-f42ae4ffd175)
 
 ### Fine-tuning with Mistral API
 
@@ -29,7 +29,7 @@ We leveraged the Mistral fine-tuning API for two critical aspects:
 
 ### Solution Diagram
 
-![Solution Diagram](https://github.com/unit8co/mistral-hackathon-finetuning/assets/1738060/75e9bf20-567d-40b9-b81e-22064b63f26b)
+![Solution Diagram](https://github.com/chris-ch/mistral-hackathon-finetuning/assets/1738060/75e9bf20-567d-40b9-b81e-22064b63f26b)
 
 ## Finetuning Usage
 
@@ -49,7 +49,7 @@ We leveraged the Mistral fine-tuning API for two critical aspects:
    - Autogen agent requiring multiple interactions.
    - Fine-tuned smaller model for efficiency and scalability.
 
-![Fine-tuning Results](https://github.com/unit8co/mistral-hackathon-finetuning/assets/1738060/8ca57196-4841-4c9a-907f-e732a8d53a74)
+![Fine-tuning Results](https://github.com/chris-ch/mistral-hackathon-finetuning/assets/1738060/8ca57196-4841-4c9a-907f-e732a8d53a74)
 
 ### Fine-tuning for Classification
 
@@ -75,7 +75,7 @@ We prepared a dataset of legal cases categorized under Civil, Public, or Crimina
 ## How to Run
 
 ```bash
-git clone git@github.com:unit8co/mistral-hackathon-finetuning.git
+git clone git@github.com:chris-ch/mistral-hackathon-finetuning.git
 cd mistral-hackathon-finetuning
 
 # Ensure you have Python 3.11+ and Node.js + npm (tested with Node v22.1.0, npm 10.7.0) for the frontend.
@@ -86,7 +86,7 @@ cd mistral-hackathon-finetuning
 # unzip it in the root of the repo
 
 # Create a virtual environment
-python -m venv .venv
+python3 -m venv .venv
 
 # Install dependencies
 pip install -r requirements.txt
