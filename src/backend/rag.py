@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional, Literal
 
+import sys
 import glob
 import json
 import uuid
@@ -121,6 +122,19 @@ class EmbeddingModel:
             idx_end = (batch_idx + 1) * self.batch_size
             batch = input[idx_start:idx_end]
             embeddings += self.embedding_fun(batch)
+            
+            # Progress indicator
+            progress = (batch_idx + 1) / nb_batches
+            bar_length = 30
+            filled_length = int(bar_length * progress)
+            bar = '=' * filled_length + '-' * (bar_length - filled_length)
+            
+            sys.stdout.write(f'\rProgress: [{bar}] {progress:.1%} ({batch_idx + 1}/{nb_batches})')
+            sys.stdout.flush()
+
+        # Print a newline after the loop completes
+        print()
+
         return embeddings
 
 class RAGModel:
@@ -131,8 +145,8 @@ class RAGModel:
         self.prompt_system = config["prompt_system"]
         self.prompt_template = config["prompt_template"]
 
+        print("slicing document into smaller chunks")
 
-        # Slice document into smaller chunks
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=config["chunk_size"],
             chunk_overlap=config["chunk_overlap"],
@@ -145,6 +159,8 @@ class RAGModel:
             api_key=config["embedding_api_key"],
         )
 
+        print(f"creating Vector DB persistent client for expert '{expert_name}'")
+
         # Vector database/Search index
         self.db_client = chromadb.PersistentClient(
             path="chroma",
@@ -156,7 +172,12 @@ class RAGModel:
         self.vectordb = self.db_client.get_or_create_collection(name=expert_name)
         # Empty collection, need to populate it
         if force_collection_creation or self.vectordb.count() == 0:
+            print("populating empty collection")
             self.create_vectordb()
+        else:
+            print("DB already created")
+
+        print(f"creating completion model using provider '{config["completion_provider"]}'")
 
         # Completion model, answer request based on supporting content
         self.completion_model = CompletionModel(
@@ -176,14 +197,17 @@ class RAGModel:
         chunks = []
         for f_path in all_files:
             # TODO: store metadata
+            print(f"slicing {f_path} into chunks")
             chunks += self._load_and_split_document(f_path)
 
-        # Embedd the content
+        # Embed the content
+        print(f"embedding {len(chunks)} chunks")
         vectors = self.embedding_model.embed(chunks)
 
         # Create ids for each chunk
         ids = [str(uuid.uuid4()) for _ in range(len(chunks))]
 
+        print(f"adding vectors to DB")
         # update the vectordb with the new chunks & vectors
         self.vectordb.add(
             embeddings=vectors,
@@ -218,6 +242,7 @@ class RAGModel:
             3. update the prompt with the information
             4. return the completion model reponse
         """
+        print("starting predict phase")
         relevant_chunks = self._retrieve_supporting_content(case.description)
 
         # convert relevant chunks to a list of string

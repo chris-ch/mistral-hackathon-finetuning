@@ -47,6 +47,8 @@ config = {
     "temperature": 0,
 }
 
+print(f'using Mistral API Key {os.environ.get("MISTRAL_API_KEY")}')
+
 mas_to_mad = {
     "Civil": "private",
     "Criminal": "criminal",
@@ -55,6 +57,7 @@ mas_to_mad = {
 
 rag_models = {}
 for name in mas_to_mad.values():
+    print(f"creating RAG model {name}")
     rag_models[name] = RAGModel(
         expert_name=name,
         config=config,
@@ -67,10 +70,13 @@ app.autogen_chat = {}
 
 class ConnectionManager:
     def __init__(self):
+        print("Connection Manager activated")
         self.active_connections: list[AutogenChat] = []
 
     async def connect(self, autogen_chat: AutogenChat):
+        print(f"waiting for chat {autogen_chat.chat_id} to connect")
         await autogen_chat.websocket.accept()
+        print(f"connection accepted {autogen_chat.chat_id}")
         self.active_connections.append(autogen_chat)
 
     async def disconnect(self, autogen_chat: AutogenChat):
@@ -116,6 +122,7 @@ def extract_case_summary(text):
 
 @app.websocket("/ws/{chat_id}")
 async def websocket_endpoint(websocket: WebSocket, chat_id: str):
+    print(f"received request for chat #{chat_id}")
     try:
         autogen_chat = AutogenChat(chat_id=chat_id, websocket=websocket)
         await manager.connect(autogen_chat)
