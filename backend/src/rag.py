@@ -1,21 +1,17 @@
 """
 """
 from enum import Enum
-from typing import List, Dict, Optional, Literal, Tuple
+import logging
+from typing import List, Dict, Optional, Tuple
 
 import sys
-import glob
 import json
-import uuid
 from time import time
-from bs4 import BeautifulSoup
 
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE, Settings
 from chromadb import Documents, EmbeddingFunction, Embeddings
-
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from mistralai import Mistral, SystemMessage, UserMessage
 
@@ -24,28 +20,51 @@ from prompts import CASE_PLACEHOLDER, SUPPORTING_CONTENT_PLACEHOLDER
 
 
 class LegalType(Enum):
+    """_summary_
+
+    Args:
+        Enum (_type_): _description_
+
+    Raises:
+        ValueError: _description_
+
+    Returns:
+        _type_: _description_
+    """
     PRIVATE = "private"
     CRIMINAL = "criminal"
     PUBLIC = "state"
 
+    @staticmethod
+    def from_string(value: str):
+        """_summary_
+
+        Args:
+            value (str): _description_
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        try:
+            return LegalType(value)
+        except ValueError as exc:
+            raise ValueError(f"'{value}' is not a valid LegalType") from exc
+
 
 class CompletionModel:
+    """_summary_
+    """
     def __init__(
             self,
-            provider: Literal["mistral", "openai"],
             api_key: str,
-            api_version: Optional[str],
-            endpoint: str,
             model_deployment: str
         ):
         """Class interfacing with the model deployments"""
-        self.provider = provider
         self.model = model_deployment
-
-        if self.provider == "mistral":
-            self.client = Mistral(api_key=api_key)
-        else:
-            raise ValueError("Model provider was not recognized, must be either 'mistral' or 'openai'.")
+        self.client = Mistral(api_key=api_key)
 
     def call(
         self,
@@ -63,13 +82,12 @@ class CompletionModel:
         --------
             answer: the content of the reponse of the LLM
         """
-        if self.provider == "mistral":
-            response = self.client.chat.complete(
-                model=self.model,
-                messages=list(system_user_q_and_a),
-                max_tokens=None,
-                temperature=temperature,
-            )
+        response = self.client.chat.complete(
+            model=self.model,
+            messages=list(system_user_q_and_a),
+            max_tokens=None,
+            temperature=temperature,
+        )
 
         # TODO: might contain function call?
         answer = response.choices[0].message.content
@@ -77,6 +95,11 @@ class CompletionModel:
 
 
 class MistralEmbeddingFunction(EmbeddingFunction):
+    """_summary_
+
+    Args:
+        EmbeddingFunction (_type_): _description_
+    """
     def __init__(self, api_key: str, model_deployment: str):
         self.client = Mistral(api_key=api_key)
         self.model = model_deployment
@@ -88,6 +111,8 @@ class MistralEmbeddingFunction(EmbeddingFunction):
 
 
 class EmbeddingModel:
+    """_summary_
+    """
     def __init__(self, model_deployment: str, api_key: str):
         """Use API calls to embed content"""
         self.embedding_fun = MistralEmbeddingFunction(
@@ -97,24 +122,32 @@ class EmbeddingModel:
         self.batch_size = 1
 
     def embed(self, doc: Documents):
+        """_summary_
+
+        Args:
+            doc (Documents): _description_
+
+        Returns:
+            _type_: _description_
+        """
         nb_batches = len(doc) // self.batch_size
         if len(doc) % self.batch_size != 0:
             nb_batches += 1
-        
-        print(f"created {nb_batches} batches")
+
+        logging.info("created %s batches", nb_batches)
         embeddings = []
         for batch_idx in range(nb_batches):
             idx_start = batch_idx * self.batch_size
             idx_end = (batch_idx + 1) * self.batch_size
             batch = doc[idx_start:idx_end]
             embeddings += self.embedding_fun(batch)
-            
+
             # Progress indicator
             progress = (batch_idx + 1) / nb_batches
             bar_length = 30
             filled_length = int(bar_length * progress)
             bar = '=' * filled_length + '-' * (bar_length - filled_length)
-            
+
             sys.stdout.write(f'\rProgress: [{bar}] {progress:.1%} ({batch_idx + 1}/{nb_batches})')
             sys.stdout.flush()
 
@@ -123,21 +156,15 @@ class EmbeddingModel:
 
         return embeddings
 
+
 class RAGModel:
-    def __init__(self, expert_name: str, config: Dict):
+    """_summary_
+    """
+    def __init__(self, legal_type: LegalType, config: Dict):
         """Model responsible for consuming the data to build a knowledge database"""
         self.config = config
-        self.knowledge_folder = config["knowledge_folder"]
         self.prompt_system = config["prompt_system"]
         self.prompt_template = config["prompt_template"]
-
-        print("slicing document into smaller chunks")
-
-        self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config["chunk_size"],
-            chunk_overlap=config["chunk_overlap"],
-            length_function=len,
-        )
 
         # Embedding model, convert natural langage to vector
         self.embedding_model = EmbeddingModel(
@@ -145,7 +172,7 @@ class RAGModel:
             api_key=config["embedding_api_key"],
         )
 
-        print(f"creating Vector DB persistent client for expert '{expert_name}'")
+        logging.info("creating Vector DB persistent client for expert '%s'", legal_type.value)
 
         # Vector database/Search index
         self.db_client = chromadb.PersistentClient(
@@ -156,72 +183,19 @@ class RAGModel:
         )
         #TODO: the name of the collection could actually be a parameter of predict,
         # to allow the model to switch between vector db
-        self.vectordb = self.db_client.get_or_create_collection(name=expert_name)
+        self.vectordb = self.db_client.get_or_create_collection(name=legal_type.value)
         # Empty collection, need to populate it
         if self.vectordb.count() == 0:
-            print("populating empty collection")
-            self.create_vectordb()
-            #print("you need to pupulate the Vector DB using the 'init-vector-db' script first")
-            #sys.exit(0)
-        else:
-            print("DB already created")
+            logging.error("The Vector DB must be populated using the 'init-vector-db' script")
+            sys.exit(0)
 
-        print(f'creating completion model using provider {config["completion_provider"]}')
+        logging.info('creating completion model')
 
         # Completion model, answer request based on supporting content
         self.completion_model = CompletionModel(
-            provider=config["completion_provider"],
             api_key=config["completion_api_key"],
-            api_version=config["completion_api_version"],
-            endpoint=config["completion_endpoint"],
             model_deployment=config["completion_model_deployment"],
         )
-
-    def create_vectordb(self):
-        """Load local document stored as html and add them to the vector database (Chroma Collection)"""
-        # Collect all the files to process
-        all_files = glob.glob(f"{self.knowledge_folder}/**/**/**.html", recursive=True)
-
-        # Load & slice the documents by section/articles
-        chunks = []
-        for f_path in all_files:
-            #TODO: store metadata
-            print(f"slicing {f_path} into chunks")
-            chunks += self._load_and_split_document(f_path)
-
-        # Embed the content
-        print(f"embedding {len(chunks)} chunks")
-        vectors = self.embedding_model.embed(chunks)
-
-        # Create ids for each chunk
-        ids = [str(uuid.uuid4()) for _ in range(len(chunks))]
-
-        print(f"adding vectors to DB")
-        # update the vectordb with the new chunks & vectors
-        self.vectordb.add(
-            embeddings=vectors,
-            documents=chunks,
-            ids=ids,
-            metadatas=None,
-        )
-
-
-    def _load_and_split_document(self, f_path: str) -> List[str]:
-        """Load the document (html page), extract the section tags."""
-        with open(f_path, "r") as f:
-            soup = BeautifulSoup(f.read(), 'html.parser')
-            sections = soup.find_all("section")
-
-        chunks = []
-        for sec in sections:
-            # heuristic to keep only legal text
-            if "Art" in sec.text and len(sec.text) > 10:
-                if len(sec.text) > self.splitter._chunk_size:
-                    chunks += self.splitter.split_text(sec.text)
-                else:
-                    chunks.append(sec.text)
-        return chunks
-            
 
     def predict(self, case: Case):
         """
@@ -231,7 +205,7 @@ class RAGModel:
             3. update the prompt with the information
             4. return the completion model reponse
         """
-        print("starting predict phase")
+        logging.info("starting predict phase")
         relevant_chunks = self._retrieve_supporting_content(case.description)
 
         # convert relevant chunks to a list of string
@@ -254,14 +228,20 @@ class RAGModel:
             "answer": answer,
             "support_content": relevant_chunks_str,
         }
-    
+
     def predict_from_dataset(self, dataset: List[Case], export_predictions: bool = True):
+        """_summary_
+
+        Args:
+            dataset (List[Case]): _description_
+            export_predictions (bool, optional): _description_. Defaults to True.
+        """
         # Generate prediction for all the cases in the dataset
         predictions = [self.predict(case=entry) for entry in dataset]
 
         # Export the predictions
         if export_predictions:
-            with open(f"{time()}_predictions.json", "w") as f:
+            with open(f"{time()}_predictions.json", mode="w", encoding="utf8") as f:
                 json.dump(predictions, f, indent=4)
 
     def _retrieve_supporting_content(self, query: str) -> QueryResult:

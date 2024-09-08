@@ -1,10 +1,15 @@
+"""_summary_
+
+    Returns:
+        _type_: _description_
 """
-"""
+import logging
 import re
 import json
 import os
 
 import asyncio
+import sys
 from fastapi import FastAPI, WebSocket
 from autogen_chat import AutogenChat
 import uvicorn
@@ -17,17 +22,10 @@ from utils import Case, LawDomain
 
 load_dotenv()
 
-classifier = Classifier.from_pretrained("data/classifier_tfidflgbm")
-
 config = {
-    # rag knowledge path
-    "knowledge_folder": "data/federal_law_short",
     # rag prompts
     "prompt_system": PROMPT_SYSTEM,
     "prompt_template": PROMPT_TEMPLATE,
-    # splitter
-    "chunk_size": 2000,
-    "chunk_overlap": 100,
     # embedding model
     "embedding_provider": "mistral",
     "embedding_model_deployment": "mistral-embed",
@@ -37,7 +35,6 @@ config = {
     # retrieval parameters
     "n_results": 5,
     # completion model
-    "completion_provider": "mistral",
     "completion_model_deployment": "mistral-large-latest",
     "completion_api_key": os.environ.get("MISTRAL_API_KEY"),
     "completion_api_version": "",
@@ -45,47 +42,42 @@ config = {
     "temperature": 0,
 }
 
-print(f'using Mistral API Key {os.environ.get("MISTRAL_API_KEY")}')
-
-mas_to_mad = {
-    "Civil": LegalType.PRIVATE.value,
-    "Criminal": LegalType.CRIMINAL.value,
-    "Public": LegalType.PUBLIC.value,
-}
-
-rag_models = {}
-for name in mas_to_mad.values():
-    print(f"creating RAG model {name}")
-    rag_models[name] = RAGModel(
-        expert_name=name,
-        config=config
-    )
-
-app = FastAPI()
-app.autogen_chat = {}
-
 
 class ConnectionManager:
+    """_summary_
+    """
     def __init__(self):
-        print("Connection Manager activated")
+        logging.info("Connection Manager activated")
         self.active_connections: list[AutogenChat] = []
 
     async def connect(self, autogen_chat: AutogenChat):
-        print(f"waiting for chat {autogen_chat.chat_id} to connect")
+        """_summary_
+
+        Args:
+            autogen_chat (AutogenChat): _description_
+        """
+        logging.info("waiting for chat %s to connect", autogen_chat.chat_id)
         await autogen_chat.websocket.accept()
-        print(f"connection accepted {autogen_chat.chat_id}")
+        logging.info("connection accepted %s", autogen_chat.chat_id)
         self.active_connections.append(autogen_chat)
 
     async def disconnect(self, autogen_chat: AutogenChat):
+        """_summary_
+
+        Args:
+            autogen_chat (AutogenChat): _description_
+        """
         autogen_chat.client_receive_queue.put_nowait("DO_FINISH")
-        print(f"autogen_chat {autogen_chat.chat_id} disconnected")
+        logging.info("autogen_chat %s disconnected", autogen_chat.chat_id)
         self.active_connections.remove(autogen_chat)
 
 
-manager = ConnectionManager()
-
-
 async def send_to_client(autogen_chat: AutogenChat):
+    """_summary_
+
+    Args:
+        autogen_chat (AutogenChat): _description_
+    """
     while True:
         reply = await autogen_chat.client_receive_queue.get()
         if reply and reply == "DO_FINISH":
@@ -97,6 +89,11 @@ async def send_to_client(autogen_chat: AutogenChat):
 
 
 async def receive_from_client(autogen_chat: AutogenChat):
+    """_summary_
+
+    Args:
+        autogen_chat (AutogenChat): _description_
+    """
     while True:
         data = await autogen_chat.websocket.receive_text()
         if data and data == "DO_FINISH":
@@ -109,6 +106,14 @@ async def receive_from_client(autogen_chat: AutogenChat):
 
 # Define a function to extract the case summary
 def extract_case_summary(text):
+    """_summary_
+
+    Args:
+        text (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     # Use regex to find the text starting with "Case Summary:" and ending before the next paragraph
     match = re.search(r"Case Summary:(.*?)(?:\n\n|$)", text, re.DOTALL)
     if match:
@@ -117,9 +122,40 @@ def extract_case_summary(text):
         return None
 
 
+try:
+    mistral_api_key = os.environ["MISTRAL_API_KEY"]
+except KeyError:
+    logging.error("MISTRAL_API_KEY environment variable is not set")
+    sys.exit(1)
+
+
+app = FastAPI()
+app.autogen_chat = {}
+
+mas_to_mad = {
+    "Civil": LegalType.PRIVATE,
+    "Criminal": LegalType.CRIMINAL,
+    "Public": LegalType.PUBLIC,
+}
+
+rag_models = {}
+for lt in mas_to_mad.values():
+    logging.info("creating RAG model %s", lt.value)
+    rag_models[lt] = RAGModel(legal_type=lt, config=config)
+
+
+mgr = ConnectionManager()
+clsfr = Classifier.from_pretrained("data/classifier_tfidflgbm")
+
 @app.websocket("/ws/{chat_id}")
-async def websocket_endpoint(websocket: WebSocket, chat_id: str):
-    print(f"received request for chat #{chat_id}")
+async def websocket_endpoint(websocket: WebSocket, chat_id: str, manager=mgr, classifier=clsfr):
+    """_summary_
+
+    Args:
+        websocket (WebSocket): _description_
+        chat_id (str): _description_
+    """
+    logging.info("received request for chat #%s", chat_id)
     try:
         autogen_chat = AutogenChat(chat_id=chat_id, websocket=websocket)
         await manager.connect(autogen_chat)
@@ -131,11 +167,11 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str):
 
         last_dona_message = autogen_chat.agent_dona.last_message()["content"]
         case_summary = extract_case_summary(last_dona_message)
-        print(f"Case Summary: {case_summary}")
+        logging.info("Case Summary: %s", case_summary)
 
         # classify the case summary
         case_type = classifier.predict(case_summary)
-        print(f"Case Type: {case_type}")
+        logging.info("Case Type: %s",case_type)
 
         reply = {
             "sender": "rachel",
@@ -150,9 +186,9 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str):
             outcome=True,
             domain=LawDomain.CRIMINAL,
         )
-        rag_output = rag_models[mas_to_mad[case_type]].predict(legal_case)
+        rag_output = rag_models[mas_to_mad[LegalType.from_string(case_type)]].predict(legal_case)
 
-        print(f"Relevant articles: {rag_output['support_content']}")
+        logging.info("Relevant articles: %s", rag_output['support_content'])
 
         reply = {
             "sender": "rachel",
@@ -163,14 +199,15 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str):
         await asyncio.sleep(0.05)
         # here add the next steps (classification ...)
         # await autogen_chat.research(data)
-    except Exception as e:
-        print("ERROR", str(e))
     finally:
-        try:
-            await manager.disconnect(autogen_chat)
-        except:
-            pass
+        await manager.disconnect(autogen_chat)
+
+
+def main():
+    """_summary_
+    """
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    main()
