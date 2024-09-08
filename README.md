@@ -95,7 +95,7 @@ pip install -r requirements.txt
 cp .env.template .env
 
 # Start the backend
-PYTHONPATH=$(pwd) python src/backend/main.py
+PYTHONPATH=$(pwd) python backend/src/main.py
 
 # In another terminal, navigate to the frontend folder and run the frontend
 cd src/frontend

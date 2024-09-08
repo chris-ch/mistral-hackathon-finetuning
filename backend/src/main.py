@@ -1,29 +1,27 @@
+"""
+"""
 import re
 import json
 import os
 
+import asyncio
 from fastapi import FastAPI, WebSocket
 from autogen_chat import AutogenChat
-import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
-from classifier import Classifier, LLMClassifier
+from classifier import Classifier
 from prompts import PROMPT_SYSTEM, PROMPT_TEMPLATE
-from rag import RAGModel
+from rag import LegalType, RAGModel
 from utils import Case, LawDomain
 
 load_dotenv()
 
 classifier = Classifier.from_pretrained("data/classifier_tfidflgbm")
-# classifier = LLMClassifier(
-#     model_id='ft:open-mistral-7b:41dfebed:20240628:9f2401ad',
-#     api_key=os.environ.get("MISTRAL_API_KEY", "")
-# )
 
 config = {
     # rag knowledge path
-    "knowledge_folder": "data/federal_law",
+    "knowledge_folder": "data/federal_law_short",
     # rag prompts
     "prompt_system": PROMPT_SYSTEM,
     "prompt_template": PROMPT_TEMPLATE,
@@ -50,9 +48,9 @@ config = {
 print(f'using Mistral API Key {os.environ.get("MISTRAL_API_KEY")}')
 
 mas_to_mad = {
-    "Civil": "private",
-    "Criminal": "criminal",
-    "Public": "state",
+    "Civil": LegalType.PRIVATE.value,
+    "Criminal": LegalType.CRIMINAL.value,
+    "Public": LegalType.PUBLIC.value,
 }
 
 rag_models = {}
@@ -60,8 +58,7 @@ for name in mas_to_mad.values():
     print(f"creating RAG model {name}")
     rag_models[name] = RAGModel(
         expert_name=name,
-        config=config,
-        force_collection_creation=False,
+        config=config
     )
 
 app = FastAPI()

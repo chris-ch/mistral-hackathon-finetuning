@@ -1,4 +1,7 @@
-from typing import List, Dict, Optional, Literal
+"""
+"""
+from enum import Enum
+from typing import List, Dict, Optional, Literal, Tuple
 
 import sys
 import glob
@@ -14,14 +17,16 @@ from chromadb import Documents, EmbeddingFunction, Embeddings
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from openai import AzureOpenAI
-from openai.types.chat import ChatCompletionUserMessageParam
-
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+from mistralai import Mistral, SystemMessage, UserMessage
 
 from utils import Case
 from prompts import CASE_PLACEHOLDER, SUPPORTING_CONTENT_PLACEHOLDER
+
+
+class LegalType(Enum):
+    PRIVATE = "private"
+    CRIMINAL = "criminal"
+    PUBLIC = "state"
 
 
 class CompletionModel:
@@ -38,22 +43,13 @@ class CompletionModel:
         self.model = model_deployment
 
         if self.provider == "mistral":
-            self.client = MistralClient(
-                api_key=api_key,
-            )
-            
-        elif provider == "openai":
-            self.client = AzureOpenAI(
-                api_version=api_version,
-                api_key=api_key,
-                azure_endpoint=endpoint,
-            )
+            self.client = Mistral(api_key=api_key)
         else:
             raise ValueError("Model provider was not recognized, must be either 'mistral' or 'openai'.")
 
     def call(
         self,
-        messages: List[Dict],
+        system_user_q_and_a: Tuple[SystemMessage, UserMessage],
         temperature: Optional[float],
     ) -> str:
         """Send request to LLM
@@ -67,18 +63,10 @@ class CompletionModel:
         --------
             answer: the content of the reponse of the LLM
         """
-        if self.provider == "openai":
-            response = self.client.chat.completions.create(
+        if self.provider == "mistral":
+            response = self.client.chat.complete(
                 model=self.model,
-                messages=[ChatCompletionUserMessageParam(**msg) for msg in messages],
-                max_tokens=None,
-                temperature=temperature,
-                user="unknown",
-            )
-        elif self.provider == "mistral":
-            response = self.client.chat(
-                model=self.model,
-                messages=[ChatMessage(**msg) for msg in messages],
+                messages=list(system_user_q_and_a),
                 max_tokens=None,
                 temperature=temperature,
             )
@@ -86,21 +74,18 @@ class CompletionModel:
         # TODO: might contain function call?
         answer = response.choices[0].message.content
         return answer if answer is not None else "Failed to complete"
-    
+
+
 class MistralEmbeddingFunction(EmbeddingFunction):
     def __init__(self, api_key: str, model_deployment: str):
-        self.client = MistralClient(
-                api_key=api_key,
-            )
+        self.client = Mistral(api_key=api_key)
         self.model = model_deployment
 
-    def __call__(self, input: Documents) -> Embeddings:
-        embeddings_batch_response = self.client.embeddings(
-            model=self.model,
-            input=input
-        )
-        # TODO: make sure that the order is preserved?!
+    def __call__(self, doc: Documents) -> Embeddings:
+        embeddings_batch_response = self.client.embeddings.create(model=self.model, inputs=doc)
+        #TODO: make sure that the order is preserved?!
         return [entry.embedding for entry in embeddings_batch_response.data]
+
 
 class EmbeddingModel:
     def __init__(self, model_deployment: str, api_key: str):
@@ -111,16 +96,17 @@ class EmbeddingModel:
             )
         self.batch_size = 1
 
-    def embed(self, input: Documents):
-        nb_batches = len(input) // self.batch_size
-        if len(input) % self.batch_size != 0:
+    def embed(self, doc: Documents):
+        nb_batches = len(doc) // self.batch_size
+        if len(doc) % self.batch_size != 0:
             nb_batches += 1
         
+        print(f"created {nb_batches} batches")
         embeddings = []
         for batch_idx in range(nb_batches):
             idx_start = batch_idx * self.batch_size
             idx_end = (batch_idx + 1) * self.batch_size
-            batch = input[idx_start:idx_end]
+            batch = doc[idx_start:idx_end]
             embeddings += self.embedding_fun(batch)
             
             # Progress indicator
@@ -138,7 +124,7 @@ class EmbeddingModel:
         return embeddings
 
 class RAGModel:
-    def __init__(self, expert_name: str, config: Dict, force_collection_creation: bool = False):
+    def __init__(self, expert_name: str, config: Dict):
         """Model responsible for consuming the data to build a knowledge database"""
         self.config = config
         self.knowledge_folder = config["knowledge_folder"]
@@ -168,12 +154,15 @@ class RAGModel:
             tenant=DEFAULT_TENANT,
             database=DEFAULT_DATABASE,
         )
-        # TODO: the name of the collection could actually be a parameter of predict, to allow the model to switch between vector db
+        #TODO: the name of the collection could actually be a parameter of predict,
+        # to allow the model to switch between vector db
         self.vectordb = self.db_client.get_or_create_collection(name=expert_name)
         # Empty collection, need to populate it
-        if force_collection_creation or self.vectordb.count() == 0:
+        if self.vectordb.count() == 0:
             print("populating empty collection")
             self.create_vectordb()
+            #print("you need to pupulate the Vector DB using the 'init-vector-db' script first")
+            #sys.exit(0)
         else:
             print("DB already created")
 
@@ -196,7 +185,7 @@ class RAGModel:
         # Load & slice the documents by section/articles
         chunks = []
         for f_path in all_files:
-            # TODO: store metadata
+            #TODO: store metadata
             print(f"slicing {f_path} into chunks")
             chunks += self._load_and_split_document(f_path)
 
@@ -256,12 +245,9 @@ class RAGModel:
             case_description=case.description,
             supporting_content=relevant_chunks_str,
         )
-
+        q_and_a = (SystemMessage(content=self.prompt_system), UserMessage(content=completion_query))
         answer = self.completion_model.call(
-            messages=[
-                {"role": "system", "content": self.prompt_system},
-                {"role": "user", "content": completion_query}
-            ],
+            system_user_q_and_a=q_and_a,
             temperature=self.config["temperature"]
         )
         return {
