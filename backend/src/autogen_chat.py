@@ -22,7 +22,7 @@ dona_config = {
     "config_list": [
         {
             "api_type": "mistral",
-            "model": 'ft:open-mistral-7b:41dfebed:20240628:a9a7c195',
+            "model": 'mistral-large-latest',
             "api_key": os.environ.get("MISTRAL_API_KEY"),
             "temperature": 0.0,
         }

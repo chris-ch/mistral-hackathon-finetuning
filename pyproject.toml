@@ -20,6 +20,7 @@ chromadb = "^0.5.5"
 pyautogen = "^0.3.0"
 lightgbm = "^4.5.0"
 scikit-learn = "^1.5.1"
+fastapi = "^0.114.0"
 
 
 [build-system]
@@ -28,3 +29,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 init-vector-db = "scripts.init-vector-db:main"
+backend = "scripts.backend:main"

@@ -38,6 +38,27 @@ def _load_and_split_document(f_path: str,
     return chunks
 
 
+def analyze_string_lengths(chunks: List[str]):
+    """_summary_
+
+    Args:
+        chunks (List[str]): _description_
+    """
+    if not chunks:
+        print("The list is empty.")
+        return
+
+    lengths = [len(chunk) for chunk in chunks]
+    
+    avg_length = sum(lengths) / len(lengths)
+    min_length = min(lengths)
+    max_length = max(lengths)
+
+    print(f"Average string length: {avg_length:.0f}")
+    print(f"Minimum string length: {min_length}")
+    print(f"Maximum string length: {max_length}")
+
+
 def main():
     """Preparing Chroma Vector Database"""
 
@@ -57,6 +78,7 @@ def main():
     parser.add_argument("-m", "--embedding-model", required=False, default="mistral-embed",
                         action="store", type=str, dest="embedding_model", help="Chunk overlap")
     parser.add_argument("knowledge_folder", type=str, help="Knowledge folder")
+    parser.add_argument("batch_size", type=int, help="Batch size for reducing requests rate")
 
     allowed_choices = ', '.join([f'"{e.value}"' for e in LegalType])
 
@@ -77,6 +99,7 @@ def main():
     embedding_model = EmbeddingModel(
         model_deployment=args.embedding_model,
         api_key=embedding_api_key,
+        batch_size=args.batch_size
     )
 
     logging.info(
@@ -100,7 +123,7 @@ def main():
         f"{args.knowledge_folder}/**/**/**.html", recursive=True)
 
     # Load & slice the documents by section/articles
-    chunks = []
+    chunks: List[str] = []
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
@@ -110,6 +133,8 @@ def main():
         # TODO: store metadata
         logging.info("slicing %s into chunks", f_path)
         chunks += _load_and_split_document(f_path, splitter, args.chunk_size)
+
+    analyze_string_lengths(chunks)
 
     if len(chunks) > MAX_BATCH_SIZE:
         msg = f"Batch size {len(chunks)} exceeding maximum of {

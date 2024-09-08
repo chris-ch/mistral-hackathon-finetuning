@@ -113,13 +113,13 @@ class MistralEmbeddingFunction(EmbeddingFunction):
 class EmbeddingModel:
     """_summary_
     """
-    def __init__(self, model_deployment: str, api_key: str):
+    def __init__(self, model_deployment: str, api_key: str, batch_size: int = 1):
         """Use API calls to embed content"""
         self.embedding_fun = MistralEmbeddingFunction(
                 api_key=api_key,
                 model_deployment=model_deployment,
             )
-        self.batch_size = 1
+        self.batch_size = batch_size
 
     def embed(self, doc: Documents):
         """_summary_
@@ -130,25 +130,25 @@ class EmbeddingModel:
         Returns:
             _type_: _description_
         """
-        nb_batches = len(doc) // self.batch_size
+        count_batches = len(doc) // self.batch_size
         if len(doc) % self.batch_size != 0:
-            nb_batches += 1
+            count_batches += 1
 
-        logging.info("created %s batches", nb_batches)
+        logging.info("processing %s batches", count_batches)
         embeddings = []
-        for batch_idx in range(nb_batches):
+        for batch_idx in range(count_batches):
             idx_start = batch_idx * self.batch_size
             idx_end = (batch_idx + 1) * self.batch_size
             batch = doc[idx_start:idx_end]
             embeddings += self.embedding_fun(batch)
 
             # Progress indicator
-            progress = (batch_idx + 1) / nb_batches
+            progress = (batch_idx + 1) / count_batches
             bar_length = 30
             filled_length = int(bar_length * progress)
-            bar = '=' * filled_length + '-' * (bar_length - filled_length)
+            progress_bar = '=' * filled_length + '-' * (bar_length - filled_length)
 
-            sys.stdout.write(f'\rProgress: [{bar}] {progress:.1%} ({batch_idx + 1}/{nb_batches})')
+            sys.stdout.write(f'\rProgress: [{progress_bar}] {progress:.1%} ({batch_idx + 1}/{count_batches})')
             sys.stdout.flush()
 
         # Print a newline after the loop completes
