@@ -108,8 +108,6 @@ class UserProxyWebAgent(autogen.UserProxyAgent):
         last_message = self.last_message()
         if last_message["content"]:
             # very hack way to retrieve the sender name but couldnt find a better way for now
-            [k for k in self.chat_messages.keys()][0].name
-
             last_message["sender"] = [k for k in self.chat_messages.keys()][0].name
 
             await self.client_receive_queue.put(json.dumps(last_message))

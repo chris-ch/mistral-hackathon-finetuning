@@ -1,9 +1,6 @@
 """
 """
 import pickle
-from mistralai import Mistral
-from mistralai import UserMessage
-from prompts import PROMPT_CLASSIFIER
 
 
 class Classifier:
@@ -28,25 +25,3 @@ class Classifier:
         with open(f"{model_folder_path}/id2label.pkl", "rb") as f:
             id2label = pickle.load(f)
         return cls(model, tfidf_vectorizer, id2label)
-
-
-class LLMClassifier:
-    """
-    """
-    def __init__(self, model_id: str, api_key: str):
-        self.client = Mistral(api_key=api_key)
-        self.model_id = model_id
-
-    def predict(self, text: str):
-        # send request to model
-        user_message = UserMessage(content=PROMPT_CLASSIFIER.replace("[CASE]", text))
-        answer = self.client.chat.complete(messages=[user_message], model=self.model_id)
-        pred = answer.choices[0].message.content
-        # parse the prediction
-        start_idx = pred.find("{")
-        end_idx = pred.find("}")+1
-        parsed = eval(pred[start_idx:end_idx])
-        if isinstance(parsed["case_category"], str):
-            return parsed["case_category"]
-        elif isinstance(parsed["case_category"], (list, tuple)):
-            return parsed["case_category"][0]

@@ -2,11 +2,9 @@
 """
 from enum import Enum
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import sys
-import json
-from time import time
 
 import chromadb
 from chromadb.api.types import QueryResult
@@ -15,8 +13,7 @@ from chromadb import Documents, EmbeddingFunction, Embeddings
 
 from mistralai import Mistral, SystemMessage, UserMessage
 
-from utils import Case
-from prompts import CASE_PLACEHOLDER, SUPPORTING_CONTENT_PLACEHOLDER
+from prompts import CASE_PLACEHOLDER, PROMPT_SYSTEM, PROMPT_TEMPLATE, SUPPORTING_CONTENT_PLACEHOLDER
 
 
 class LegalType(Enum):
@@ -88,8 +85,6 @@ class CompletionModel:
             max_tokens=None,
             temperature=temperature,
         )
-
-        # TODO: might contain function call?
         answer = response.choices[0].message.content
         return answer if answer is not None else "Failed to complete"
 
@@ -160,17 +155,18 @@ class EmbeddingModel:
 class RAGModel:
     """_summary_
     """
-    def __init__(self, legal_type: LegalType, config: Dict):
+    def __init__(self, api_key: str,
+                 legal_type: LegalType,
+                 count_results: int = 5,
+                 embedding_model="mistral-embed",
+                 completion_model="mistral-large-latest"):
         """Model responsible for consuming the data to build a knowledge database"""
-        self.config = config
-        self.prompt_system = config["prompt_system"]
-        self.prompt_template = config["prompt_template"]
+        self.prompt_system = PROMPT_SYSTEM
+        self.prompt_template = PROMPT_TEMPLATE
+        self.count_results = count_results
 
         # Embedding model, convert natural langage to vector
-        self.embedding_model = EmbeddingModel(
-            model_deployment=config["embedding_model_deployment"],
-            api_key=config["embedding_api_key"],
-        )
+        self.embedding_model = EmbeddingModel(model_deployment=embedding_model, api_key=api_key)
 
         logging.info("creating Vector DB persistent client for expert '%s'", legal_type.value)
 
@@ -193,11 +189,11 @@ class RAGModel:
 
         # Completion model, answer request based on supporting content
         self.completion_model = CompletionModel(
-            api_key=config["completion_api_key"],
-            model_deployment=config["completion_model_deployment"],
+            api_key=api_key,
+            model_deployment=completion_model,
         )
 
-    def predict(self, case: Case):
+    def predict(self, case_description: str, temperature: float = 0.):
         """
         Execute all the steps of the RAG logic:
             1. embed the query
@@ -206,7 +202,7 @@ class RAGModel:
             4. return the completion model reponse
         """
         logging.info("starting predict phase")
-        relevant_chunks = self._retrieve_supporting_content(case.description)
+        relevant_chunks = self._retrieve_supporting_content(case_description)
 
         # convert relevant chunks to a list of string
         relevant_chunks_content = relevant_chunks["documents"]
@@ -216,43 +212,26 @@ class RAGModel:
             relevant_chunks_str = []
 
         completion_query = self._inject_content_prompt(
-            case_description=case.description,
+            case_description=case_description,
             supporting_content=relevant_chunks_str,
         )
         q_and_a = (SystemMessage(content=self.prompt_system), UserMessage(content=completion_query))
         answer = self.completion_model.call(
             system_user_q_and_a=q_and_a,
-            temperature=self.config["temperature"]
+            temperature=temperature
         )
         return {
             "answer": answer,
             "support_content": relevant_chunks_str,
         }
 
-    def predict_from_dataset(self, dataset: List[Case], export_predictions: bool = True):
-        """_summary_
-
-        Args:
-            dataset (List[Case]): _description_
-            export_predictions (bool, optional): _description_. Defaults to True.
-        """
-        # Generate prediction for all the cases in the dataset
-        predictions = [self.predict(case=entry) for entry in dataset]
-
-        # Export the predictions
-        if export_predictions:
-            with open(f"{time()}_predictions.json", mode="w", encoding="utf8") as f:
-                json.dump(predictions, f, indent=4)
-
     def _retrieve_supporting_content(self, query: str) -> QueryResult:
         # Embed the query
         vector_query = self.embedding_model.embed([query])
 
         # Retrieve relevant chunks
-        relevant_chunks = self.vectordb.query(
-            query_embeddings=vector_query,
-            n_results=self.config["n_results"],
-        )
+        relevant_chunks = self.vectordb.query(query_embeddings=vector_query,
+                                              n_results=self.count_results)
         return relevant_chunks
 
     def _inject_content_prompt(
