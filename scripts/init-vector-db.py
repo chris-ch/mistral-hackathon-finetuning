@@ -13,7 +13,8 @@ import bs4
 import chromadb
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from rag import EmbeddingModel, LegalType
+from embedding import EmbeddingModel
+from rag import LegalType
 from helpers import setup_logging_levels
 
 MAX_BATCH_SIZE = 41666

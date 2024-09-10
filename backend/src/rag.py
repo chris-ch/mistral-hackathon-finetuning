@@ -9,10 +9,9 @@ import sys
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE, Settings
-from chromadb import Documents, EmbeddingFunction, Embeddings
-
 from mistralai import Mistral, SystemMessage, UserMessage
 
+from embedding import EmbeddingModel
 from prompts import CASE_PLACEHOLDER, PROMPT_SYSTEM, PROMPT_TEMPLATE, SUPPORTING_CONTENT_PLACEHOLDER
 
 
@@ -73,8 +72,7 @@ class CompletionModel:
         Parameters:
         -----------
             messages: conversation with the LLM, can include system messages as well as the history
-            temperature: impact the imagination and variability of the LLm answers
-
+            temperature: impact the imagination an_summary_
         Returns:
         --------
             answer: the content of the reponse of the LLM
@@ -89,69 +87,6 @@ class CompletionModel:
         return answer if answer is not None else "Failed to complete"
 
 
-class MistralEmbeddingFunction(EmbeddingFunction):
-    """_summary_
-
-    Args:
-        EmbeddingFunction (_type_): _description_
-    """
-    def __init__(self, api_key: str, model_deployment: str):
-        self.client = Mistral(api_key=api_key)
-        self.model = model_deployment
-
-    def __call__(self, doc: Documents) -> Embeddings:
-        embeddings_batch_response = self.client.embeddings.create(model=self.model, inputs=doc)
-        #TODO: make sure that the order is preserved?!
-        return [entry.embedding for entry in embeddings_batch_response.data]
-
-
-class EmbeddingModel:
-    """_summary_
-    """
-    def __init__(self, model_deployment: str, api_key: str, batch_size: int = 1):
-        """Use API calls to embed content"""
-        self.embedding_fun = MistralEmbeddingFunction(
-                api_key=api_key,
-                model_deployment=model_deployment,
-            )
-        self.batch_size = batch_size
-
-    def embed(self, doc: Documents):
-        """_summary_
-
-        Args:
-            doc (Documents): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        count_batches = len(doc) // self.batch_size
-        if len(doc) % self.batch_size != 0:
-            count_batches += 1
-
-        logging.info("processing %s batches", count_batches)
-        embeddings = []
-        for batch_idx in range(count_batches):
-            idx_start = batch_idx * self.batch_size
-            idx_end = (batch_idx + 1) * self.batch_size
-            batch = doc[idx_start:idx_end]
-            embeddings += self.embedding_fun(batch)
-
-            # Progress indicator
-            progress = (batch_idx + 1) / count_batches
-            bar_length = 30
-            filled_length = int(bar_length * progress)
-            progress_bar = '=' * filled_length + '-' * (bar_length - filled_length)
-
-            sys.stdout.write(f'\rProgress: [{progress_bar}] {progress:.1%} ({batch_idx + 1}/{count_batches})')
-            sys.stdout.flush()
-
-        # Print a newline after the loop completes
-        print()
-
-        return embeddings
-
-
 class RAGModel:
     """_summary_
     """
@@ -162,7 +97,6 @@ class RAGModel:
                  completion_model="mistral-large-latest"):
         """Model responsible for consuming the data to build a knowledge database"""
         self.prompt_system = PROMPT_SYSTEM
-        self.prompt_template = PROMPT_TEMPLATE
         self.count_results = count_results
 
         # Embedding model, convert natural langage to vector
@@ -170,7 +104,7 @@ class RAGModel:
 
         logging.info("creating Vector DB persistent client for expert '%s'", legal_type.value)
 
-        # Vector database/Search index
+        # Vector database/Search indexpredict
         self.db_client = chromadb.PersistentClient(
             path="chroma",
             settings=Settings(anonymized_telemetry=False),
@@ -193,7 +127,7 @@ class RAGModel:
             model_deployment=completion_model,
         )
 
-    def predict(self, case_description: str, temperature: float = 0.):
+    def find_sources_and_answer(self, case_description: str, temperature: float = 0.):
         """
         Execute all the steps of the RAG logic:
             1. embed the query
@@ -202,14 +136,14 @@ class RAGModel:
             4. return the completion model reponse
         """
         logging.info("starting predict phase")
-        relevant_chunks = self._retrieve_supporting_content(case_description)
+        relevant_chunks = self._retrieve_relevant_documents(case_description)
 
         # convert relevant chunks to a list of string
         relevant_chunks_content = relevant_chunks["documents"]
         if relevant_chunks_content is not None:
             relevant_chunks_str = relevant_chunks_content[0]
         else:
-            relevant_chunks_str = []
+            relevant_chunks_str = ""
 
         completion_query = self._inject_content_prompt(
             case_description=case_description,
@@ -225,7 +159,7 @@ class RAGModel:
             "support_content": relevant_chunks_str,
         }
 
-    def _retrieve_supporting_content(self, query: str) -> QueryResult:
+    def _retrieve_relevant_documents(self, query: str) -> QueryResult:
         # Embed the query
         vector_query = self.embedding_model.embed([query])
 
@@ -237,21 +171,12 @@ class RAGModel:
     def _inject_content_prompt(
         self, case_description: str, supporting_content: List[str]
     ) -> str:
-        completion_query = self.prompt_template
 
         # inject case description in the completion request
-        if CASE_PLACEHOLDER in self.prompt_template:
-            completion_query = completion_query.replace(CASE_PLACEHOLDER, case_description)
-        else:
-            raise ValueError("Could not find the query placeholder in the prompt template.")
+        completion_query = PROMPT_TEMPLATE.replace(CASE_PLACEHOLDER, case_description)
 
         # inject supporting content in completion request
-        if SUPPORTING_CONTENT_PLACEHOLDER in self.prompt_template:
-            completion_query = completion_query.replace(
-                SUPPORTING_CONTENT_PLACEHOLDER, "\n".join(supporting_content)
-            )
-        else:
-            raise ValueError(
-                "Could not find the supporting content placeholder in the prompt template."
-            )
+        completion_query = completion_query.replace(
+            SUPPORTING_CONTENT_PLACEHOLDER, "\n".join(supporting_content)
+        )
         return completion_query

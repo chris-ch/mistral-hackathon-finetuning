@@ -95,10 +95,10 @@ pip install -r requirements.txt
 cp .env.template .env
 
 # Start the backend
-PYTHONPATH=$(pwd) python backend/src/main.py
+poetry run backend
 
 # In another terminal, navigate to the frontend folder and run the frontend
-cd src/frontend
+cd frontend/src
 # Install Node.js dependencies
 npm install
 # Run the frontend

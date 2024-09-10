@@ -1,5 +1,6 @@
+"""_summary_
 """
-"""
+import logging
 import os
 import asyncio
 
@@ -33,9 +34,11 @@ dona_config = {
     ]
 }
 
+
 class AutogenChat:
-    def __init__(self, chat_id=None, websocket=None):
-        self.websocket = websocket
+    """_summary_
+    """
+    def __init__(self, chat_id=None):
         self.chat_id = chat_id
         self.client_sent_queue = asyncio.Queue()
         self.client_receive_queue = asyncio.Queue()
@@ -65,11 +68,11 @@ class AutogenChat:
         self.agent_client.set_queues(self.client_sent_queue, self.client_receive_queue)
 
     async def clarify(self, message):
+        """_summary_
+
+        Args:
+            message (_type_): _description_
+        """
         await self.agent_client.a_initiate_chat(
             self.agent_dona, clear_history=True, message=message
-        )
-
-    async def research(self, message):
-        await self.agent_client.a_initiate_chat(
-            self.agent_rachel, clear_history=True, message=message
         )

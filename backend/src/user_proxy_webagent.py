@@ -1,40 +1,55 @@
+"""_summary_
+
+Returns:
+    _type_: _description_
+"""
+import json
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import autogen
 from autogen import Agent, ConversableAgent
-from typing import Any, Dict, List, Optional, Tuple, Union
-import json
 
 try:
     from termcolor import colored
 except ImportError:
 
-    def colored(x, *args, **kwargs):
+    def colored(x, *_, **__):
+        """_summary_
+
+        Args:
+            x (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         return x
 
 
 class UserProxyWebAgent(autogen.UserProxyAgent):
+    """_summary_
+
+    Args:
+        autogen (_type_): _description_
+    """
     def __init__(self, *args, **kwargs):
         super(UserProxyWebAgent, self).__init__(*args, **kwargs)
+        self.client_sent_queue = None
+        self.client_receive_queue = None
         self._reply_func_list = []
-        self.register_reply([Agent, None], ConversableAgent.generate_oai_reply)
-        self.register_reply(
-            [Agent, None], ConversableAgent.generate_code_execution_reply
-        )
-        self.register_reply(
-            [Agent, None], ConversableAgent.generate_function_call_reply
-        )
-        self.register_reply(
-            [Agent, None], UserProxyWebAgent.a_check_termination_and_human_reply
-        )
+        self.register_reply(trigger=[Agent, None],
+                            reply_func=UserProxyWebAgent.a_check_termination_and_human_reply,
+                            position=0)
+        self.register_reply(trigger=[Agent, None],
+                            reply_func=ConversableAgent.generate_oai_reply,
+                            position=1)
 
     async def a_check_termination_and_human_reply(
         self,
         messages: Optional[List[Dict]] = None,
         sender: Optional[Agent] = None,
-        config: Optional[Any] = None,
+        config: Optional[Any] = None
     ) -> Tuple[bool, Union[str, Dict, None]]:
         """Check if the conversation should be terminated, and if human reply is provided."""
-        if config is None:
-            config = self
         if messages is None:
             messages = self._oai_messages[sender]
         message = messages[-1]
@@ -55,7 +70,6 @@ class UserProxyWebAgent(autogen.UserProxyAgent):
                 if self.human_input_mode == "NEVER":
                     reply = "exit"
                 else:
-                    # self.human_input_mode == "TERMINATE":
                     terminate = self._is_termination_msg(message)
                     reply = await self.a_get_human_input(
                         f"Please give feedback to {sender.name}. Press enter or type 'exit' to stop the conversation: "
@@ -69,7 +83,6 @@ class UserProxyWebAgent(autogen.UserProxyAgent):
                 if self.human_input_mode == "NEVER":
                     reply = "exit"
                 else:
-                    # self.human_input_mode == "TERMINATE":
                     reply = await self.a_get_human_input(
                         f"Please give feedback to {sender.name}. Press enter or type 'exit' to stop the conversation: "
                     )
@@ -77,7 +90,6 @@ class UserProxyWebAgent(autogen.UserProxyAgent):
                     # if the human input is empty, and the message is a termination message, then we will terminate the conversation
                     reply = reply or "exit"
 
-        # print the no_human_input_msg
         if no_human_input_msg:
             print(colored(f"\n>>>>>>>> {no_human_input_msg}", "red"), flush=True)
 
@@ -101,6 +113,12 @@ class UserProxyWebAgent(autogen.UserProxyAgent):
         return False, None
 
     def set_queues(self, client_sent_queue, client_receive_queue):
+        """_summary_
+
+        Args:
+            client_sent_queue (_type_): _description_
+            client_receive_queue (_type_): _description_
+        """
         self.client_sent_queue = client_sent_queue
         self.client_receive_queue = client_receive_queue
 
