@@ -50,7 +50,7 @@ def analyze_string_lengths(chunks: List[str]):
         return
 
     lengths = [len(chunk) for chunk in chunks]
-    
+
     avg_length = sum(lengths) / len(lengths)
     min_length = min(lengths)
     max_length = max(lengths)
@@ -78,6 +78,7 @@ def main():
                         action="store", type=int, dest="chunk_overlap", help="Chunk overlap")
     parser.add_argument("-m", "--embedding-model", required=False, default="mistral-embed",
                         action="store", type=str, dest="embedding_model", help="Chunk overlap")
+    parser.add_argument('-n', '--skip-embedding', action='store_true', help='Skipping embedding phase, only displays chunks')
     parser.add_argument("knowledge_folder", type=str, help="Knowledge folder")
     parser.add_argument("batch_size", type=int, help="Batch size for reducing requests rate")
 
@@ -141,6 +142,12 @@ def main():
         msg = f"Batch size {len(chunks)} exceeding maximum of {
             MAX_BATCH_SIZE}, populate using smaller datasets."
         logging.error(msg)
+        sys.exit(-1)
+
+    if args.skip_embedding:
+        for chunk in chunks:
+            print(chunk)
+
         sys.exit(0)
 
     # Embed the content
